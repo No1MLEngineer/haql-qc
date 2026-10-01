@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+from ._version import RULESET_VERSION
 from .loader import LoadError, load_production_csv
+from .period import PeriodError, load_period_csv
 from .rules import RULES, RULE_META, run_all
 from .units import UNIT_TOKENS, normalise_unit_token
 
@@ -52,9 +54,15 @@ def _parse_unit_declarations(raw: list[str] | None) -> dict[str, str] | None:
     return out
 
 
-def _fail(msg: str) -> int:
+EXIT_OK = 0
+EXIT_FINDINGS = 1
+EXIT_USAGE = 2
+EXIT_NO_LICENSE = 3
+
+
+def _fail(msg: str, code: int = EXIT_USAGE) -> int:
     print(f"haql-qc: {msg}", file=sys.stderr)
-    return 2
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -102,7 +110,70 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     p.add_argument("--fail-on", choices=["critical", "high", "medium", "low", "info", "never"], default="never")
+    p.add_argument(
+        "--granularity",
+        choices=["daily", "period"],
+        default="daily",
+        help=(
+            "how the input encodes its period. 'daily' reads one date column "
+            "(default). 'period' reads Year+Month columns and picks up a units "
+            "row, for monthly exports that declare their own units."
+        ),
+    )
+    p.add_argument("--year-column", default="Year", help="year column when --granularity period")
+    p.add_argument("--month-column", default="Month", help="month column when --granularity period")
+    p.add_argument(
+        "--license-file",
+        help=(
+            "path to a signed HAQL1 license. Defaults to $HAQL_LICENSE_FILE, "
+            "then $HAQL_LICENSE, then ~/.haql/license.key."
+        ),
+    )
+    p.add_argument(
+        "--require-license",
+        action="store_true",
+        help=(
+            "refuse to run without a valid, unexpired, correctly signed license. "
+            "Exit code 3. Off by default, so the free evaluation tier keeps "
+            "working; distribution builds are expected to turn it on."
+        ),
+    )
+    p.add_argument(
+        "--license-status",
+        action="store_true",
+        help="print license status as JSON and exit (exit code 3 if not valid)",
+    )
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__} (ruleset {RULESET_VERSION})",
+    )
     args = p.parse_args(argv)
+
+    if args.license_status:
+        import json as _json
+
+        from . import licensing
+
+        result = licensing.check(args.license_file)
+        print(_json.dumps(result.summary(), indent=2, sort_keys=True))
+        return 0 if result.valid else 3
+
+    # The gate runs before any input is read, so an unlicensed caller does no
+    # work and, more importantly, cannot obtain findings from a build that is
+    # supposed to require payment.
+    if args.require_license:
+        from . import licensing
+
+        result = licensing.check(args.license_file)
+        if not result.valid:
+            detail = result.reason or "no license"
+            src = f" (looked at {result.source})" if result.source else ""
+            return _fail(
+                f"license required and not satisfied: {detail}{src}. Set "
+                f"$HAQL_LICENSE or pass --license-file.",
+                code=EXIT_NO_LICENSE,
+            )
 
     if args.list_rules:
         for rid in sorted(RULES):
@@ -113,16 +184,67 @@ def main(argv: list[str] | None = None) -> int:
     if not args.input:
         return _fail("--input is required unless --list-rules is given")
 
-    try:
-        rows, columns, report = load_production_csv(
-            Path(args.input),
-            well_column=args.well_column,
-            date_column=args.date_column,
+    input_path = Path(args.input)
+
+    if args.granularity == "period":
+        try:
+            rows, columns, file_units = load_period_csv(
+                input_path,
+                well_column=args.well_column,
+                year_column=args.year_column,
+                month_column=args.month_column,
+            )
+        except PeriodError as e:
+            return _fail(str(e))
+        except Exception as e:  # noqa: BLE001
+            return _fail(f"failed to read input: {e}")
+
+        from ._version import TOOL
+        from .loader import sha256_file
+        from .schema import AuditReport
+
+        report = AuditReport(
+            tool=TOOL,
+            tool_version=__version__,
+            input_path=str(input_path.resolve()),
+            input_sha256=sha256_file(input_path),
+            run_started=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            ruleset_version=RULESET_VERSION,
         )
-    except LoadError as e:
-        return _fail(str(e))
-    except Exception as e:  # noqa: BLE001
-        return _fail(f"failed to read input: {e}")
+        report.config["granularity"] = "period"
+        report.rows_read = len(rows)
+        report.wells_seen = len({r.well_id for r in rows if r.well_id})
+        # Always present for period input, empty when the file declared nothing,
+        # so a reader can tell "no units declared" from "key absent".
+        report.config["units_declared_by_file"] = file_units or {}
+    else:
+        try:
+            rows, columns, report = load_production_csv(
+                input_path,
+                well_column=args.well_column,
+                date_column=args.date_column,
+            )
+        except LoadError as e:
+            return _fail(str(e))
+        except Exception as e:  # noqa: BLE001
+            return _fail(f"failed to read input: {e}")
+        file_units = None
+
+    # Record the licence in the audit report too. The report is handed to
+    # customers and to auditors, so it should say which entitlement produced
+    # it. Only the non-sensitive fields go in; the token itself stays out.
+    from . import licensing as _licensing
+
+    _lic = _licensing.check(args.license_file)
+    if _lic.license is not None:
+        report.config["license"] = {
+            "company": _lic.license.company,
+            "tier": _lic.license.tier,
+            "seats": _lic.license.seats,
+            "expires": _lic.license.expires,
+            "nonce": _lic.license.nonce,
+            "valid": _lic.valid,
+        }
 
     if args.rules:
         unknown = [r for r in args.rules if r not in RULES]
@@ -134,6 +256,13 @@ def main(argv: list[str] | None = None) -> int:
         units = _parse_unit_declarations(args.unit_declarations)
     except ValueError as e:
         return _fail(str(e))
+
+    # A unit the file declared for itself is as authoritative as an operator
+    # declaration, and is recorded as such. Explicit --declare-unit still wins,
+    # because it is the more recent human statement about that column.
+    if file_units:
+        units = {**file_units, **(units or {})}
+    report.config["units_declared_by_file"] = file_units or {}
     if units:
         report.config["unit_declarations"] = units
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "haql-qc"
-description = "Local-first production data QC for reservoir engineering. Deterministic rules, raw-preserving audit trails, and safe opt-in corrections."
+description = "Local-first production data QC for reservoir engineering. Deterministic rules, raw-preserving audit trails, and signed license enforcement."
 readme = "README.md"
 requires-python = ">=3.9"
 dynamic = ["version"]

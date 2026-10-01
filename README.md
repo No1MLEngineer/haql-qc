@@ -12,8 +12,9 @@ production CSV with a well column and a date column.
 Three rules, in priority order:
 
 1. **Never corrupt source data.** The tool reads and reports. It does not
-   rewrite your production history. Corrections, when they exist, are opt-in,
-   written to a separate file, and recorded in the audit log.
+   rewrite your production history, and today it has no flag that writes to your
+   input at all. Findings carry a suggested correction as text; applying one is a
+   decision you make, not one the tool makes for you.
 2. **Never guess.** A unit, a column meaning, or a reporting cadence is not
    inferred when inference could put a false claim into the audit record. When
    the tool cannot establish something, it says so explicitly rather than
@@ -27,11 +28,7 @@ and no randomness. The same bytes always produce the same report.
 
 ## Install
 
-```bash
-pip install haql-qc
-```
-
-Or from a checkout:
+haql-qc is not on PyPI yet. From a checkout:
 
 ```bash
 pip install -e ".[dev]"
@@ -60,10 +57,10 @@ report -> audit.json
 
 On the real Volve daily export that yields 12 high, 34 medium and 34 info
 findings. The high ones are 4 negative water rates, 4 long date gaps, and 4
-rows where the well reports zero uptime while still producing at close to its
-normal rate — a contradiction the tool cannot resolve on its own, so it names
-both the uptime field and the volume field. One of the 34 info findings, for
-example, is a negative water rate:
+findings — across 2 source rows — where the well reports zero uptime while
+still producing at close to its normal rate. That is a contradiction the tool
+cannot resolve on its own, so it names both the uptime field and the volume
+field. One of the 4 negative water rates:
 
 ```json
 {
@@ -79,6 +76,52 @@ example, is a negative water rate:
   "suggestion": "confirm sign convention before flipping; negative production volume is not physically realisable"
 }
 ```
+
+## Monthly period exports
+
+Some operators ship period files that describe their own schema in the rows:
+the period lives in two columns instead of a date, and a second header line
+carries the unit of each measure. Volve's monthly release is the reference
+case — `Year` and `Month` columns, no date column, and a units row under the
+header.
+
+```bash
+haql-qc -i volve_monthly.csv \
+         --granularity period \
+         --well-column "Wellbore name" \
+         -r audit.json
+```
+
+This reads `Year`/`Month` into a period-end date, picks the units off the file's
+own units row, and records where each unit came from:
+
+```json
+"config": {
+  "granularity": "period",
+  "units_declared_by_file": {"Oil": "Sm3", "Gas": "Sm3", "On Stream": "hrs"},
+  "unit_declarations": {"Oil": "Sm3", "Gas": "Sm3", "On Stream": "hrs"}
+}
+```
+
+Override the file with `--declare-unit Oil=bbl`; an explicit declaration wins,
+because it is the more recent human statement about that column. Both values
+stay in the report, so the override is visible rather than silent.
+
+The units row is skipped, not audited, but it is still covered by the input
+hash. If the file declares no units, `units_declared_by_file` is `{}` and the
+tool does not fill the gap.
+
+One limit is worth stating plainly. A monthly export gives a *total* for the
+month, while most plausibility rules want a *rate*. `Sm3` on its own does not
+say whether that is a monthly volume or an instantaneous rate, and the tool
+refuses to guess: it will compare what it can, and it will not manufacture a
+daily figure out of a month total. If your rules need daily rates from monthly
+data, that conversion belongs upstream where the producing days are known.
+
+On the real Volve monthly export — 526 rows, 7 wells — this yields zero
+findings, and that zero is earned rather than assumed: the test suite injects a
+negative volume and a shut-in contradiction into monthly rows and asserts they
+surface, so a loader reading the wrong columns cannot pass silently.
 
 ## Units are declared, never inferred
 
@@ -173,6 +216,52 @@ treated as absent values, **not** as `QC003` corruption. Declared nulls are
 excluded from numeric parse-rate profiling, so a column that is 75% numeric and
 25% null is not misclassified as 25% corrupt.
 
+## Licensing
+
+haql-qc is proprietary. A license is a single signed token, three dot-separated
+base64url segments: `HAQL1.<payload>.<signature>`. The payload names the
+customer, tier, seats, and expiry; the signature is Ed25519 over those exact
+bytes, checked against the public key built into the package.
+
+The signature is what makes the license worth anything. Without it, a license is
+a string the customer can edit — extend the expiry, raise the seat count, move
+to a higher tier. All three edits fail verification, and the tool says so rather
+than silently downgrading.
+
+```bash
+haql-qc --license-status
+haql-qc --license-status --license-file /path/to/license.key
+```
+
+Discovery order is `--license-file`, then `$HAQL_LICENSE_FILE`, then
+`$HAQL_LICENSE` (the token itself), then `~/.haql/license.key` and
+`~/.haql-license/license.key`.
+
+To require a license:
+
+```bash
+haql-qc -i production.csv -r audit.json --require-license
+```
+
+`--require-license` checks before reading any input, so an unlicensed call does
+no work and produces no report. The flag is off by default so a free evaluation
+install keeps working; commercial distribution builds are expected to turn it
+on.
+
+When a license is present, the report's `config.license` block records company,
+tier, seats, expiry, and nonce — enough for an auditor to tell which entitlement
+produced the findings. The token itself is never embedded in the report.
+
+**Revocation cannot be checked offline.** The token carries no record of having
+been revoked, so a revoked license verifies correctly until it expires.
+Revocation needs a call to the issuer. `check_revocations()` exists for callers
+holding a registry; nothing in this package pretends to have solved that.
+
+Ed25519 verification is implemented in-tree (RFC 8032) rather than pulled in as a
+dependency, and it is checked against the published RFC test vectors in the test
+suite. That is a real check, not a self-consistency test — but it is still a
+hand-rolled implementation, and it is the part of this package to review hardest.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -180,6 +269,7 @@ excluded from numeric parse-rate profiling, so a column that is 75% numeric and
 | 0 | completed; no finding at or above `--fail-on` |
 | 1 | completed; a finding met or exceeded `--fail-on` |
 | 2 | bad invocation: unknown rule, malformed unit declaration, missing input |
+| 3 | `--require-license` was set and no valid license was found |
 
 `--fail-on` defaults to `never`, so the tool reports without failing a pipeline.
 Set `--fail-on high` to gate CI on the serious findings.
@@ -200,8 +290,9 @@ The report embeds `input.sha256`, `tool_version`, `ruleset_version`, the full
 runtime config, and per-rule and per-severity counts.
 
 `ruleset_version` is separate from the package version and is bumped whenever a
-rule changes what it fires on or claims — including this release, where
-`QC010` gained produced water and `QC015` gained unit conversion.
+rule changes what it fires on or claims — `QC010` gaining produced water,
+`QC015` gaining unit conversion, and `QC014`'s message learning to tell an
+injected row from a produced one.
 
 ## Library use
 

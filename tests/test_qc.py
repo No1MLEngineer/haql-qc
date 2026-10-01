@@ -776,9 +776,8 @@ class TestDocumentedExample(unittest.TestCase):
 
     def test_readme_finding_exists_in_real_output(self):
         doc = self._readme_qc010()
-        actual = json.load(open("/tmp/opencode/haql_d2.json")) if Path(
-            "/tmp/opencode/haql_d2.json"
-        ).exists() else None
+        ref = Path("/tmp/opencode/haql_d2.json")
+        actual = json.loads(ref.read_text()) if ref.exists() else None
         if actual is None:
             self.skipTest("reference report not regenerated this run")
 
@@ -908,6 +907,138 @@ class TestCliContract(unittest.TestCase):
         self.assertEqual(self._run(*base, "--fail-on", "medium")[0], 1)
 
 
+class TestPeriodCli(unittest.TestCase):
+    """--granularity period, driven only through the documented interface."""
+
+    MONTHLY = (
+        "Wellbore name,NPDCode,Year,Month,On Stream,Oil,Gas,Water,GI,WI\n"
+        ",,,,hrs,Sm3,Sm3,Sm3,Sm3,Sm3\n"
+        "W-1,7405,2014,4,227.5,11142.47,1597936.65,0,NULL,NULL\n"
+        "W-1,7405,2014,5,733.8,24901.95,3496229.65,783.48,NULL,NULL\n"
+    )
+
+    def _csv(self) -> Path:
+        d = Path(tempfile.mkdtemp())
+        p = d / "monthly.csv"
+        p.write_text(self.MONTHLY, encoding="utf-8")
+        return p
+
+    def _run(self, *args) -> tuple[int, str]:
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cli_main(list(args))
+        return code, buf.getvalue()
+
+    def test_version_flag_reports_both_versions(self):
+        """argparse's --version exits the process, so SystemExit is the contract."""
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            with self.assertRaises(SystemExit) as cm:
+                cli_main(["--version"])
+        self.assertEqual(cm.exception.code, 0)
+        out = buf.getvalue()
+        self.assertIn("haql-qc", out)
+        # Compared against the package rather than a literal, so this test
+        # cannot go stale on the next version bump and stop meaning anything.
+        from haql_qc import __version__
+
+        self.assertIn(__version__, out)
+        self.assertIn("ruleset", out)
+
+    def test_period_granularity_reads_monthly_and_reports_rows(self):
+        out_path = self._csv().parent / "audit.json"
+        code, out = self._run(
+            "-i", str(self._csv()),
+            "--granularity", "period",
+            "--well-column", "Wellbore name",
+            "-r", str(out_path),
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("rows=2", out)
+        self.assertIn("wells=1", out)
+
+    def test_units_from_the_file_are_recorded_in_the_report(self):
+        """A reviewer must be able to see where each unit came from."""
+        out_path = self._csv().parent / "audit.json"
+        self._run(
+            "-i", str(self._csv()),
+            "--granularity", "period",
+            "--well-column", "Wellbore name",
+            "-r", str(out_path),
+        )
+        config = json.loads(out_path.read_text(encoding="utf-8"))["config"]
+        self.assertEqual(config["units_declared_by_file"]["Oil"], "Sm3")
+        self.assertEqual(config["units_declared_by_file"]["On Stream"], "hrs")
+        self.assertEqual(config["granularity"], "period")
+
+    def test_explicit_declaration_overrides_the_file(self):
+        out_path = self._csv().parent / "audit.json"
+        self._run(
+            "-i", str(self._csv()),
+            "--granularity", "period",
+            "--well-column", "Wellbore name",
+            "--declare-unit", "Oil=bbl",
+            "-r", str(out_path),
+        )
+        config = json.loads(out_path.read_text(encoding="utf-8"))["config"]
+        self.assertEqual(config["units_declared_by_file"]["Oil"], "Sm3")
+        self.assertEqual(config["unit_declarations"]["Oil"], "bbl")
+
+    def test_period_report_hashes_the_exact_input_bytes(self):
+        import hashlib
+
+        csv_path = self._csv()
+        out_path = csv_path.parent / "audit.json"
+        self._run(
+            "-i", str(csv_path),
+            "--granularity", "period",
+            "--well-column", "Wellbore name",
+            "-r", str(out_path),
+        )
+        report = json.loads(out_path.read_text(encoding="utf-8"))
+        actual = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+        self.assertEqual(report["input"]["sha256"], actual)
+
+    def test_missing_period_column_exits_two(self):
+        csv_path = self._csv().parent / "wrong.csv"
+        csv_path.write_text("Wellbore name,Year\nW-1,2014\n", encoding="utf-8")
+        code, out = self._run(
+            "-i", str(csv_path),
+            "--granularity", "period",
+            "--well-column", "Wellbore name",
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("Month", out)
+
+    def test_daily_granularity_still_defaults(self):
+        """The new flag must not change existing daily behaviour."""
+        code, out = self._run("--list-rules")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(out.strip().splitlines()), len(RULES))
+
+    def test_period_fail_on_gate_still_works(self):
+        """A monthly audit must be usable in CI the same way a daily one is."""
+        csv_path = self._csv()
+        csv_path.write_text(
+            self.MONTHLY.replace("W-1,7405,2014,5,733.8", "W-1,7405,2014,5,-5.0"),
+            encoding="utf-8",
+        )
+        out_path = csv_path.parent / "audit.json"
+        base = [
+            "-i", str(csv_path),
+            "--granularity", "period",
+            "--well-column", "Wellbore name",
+            "-r", str(out_path),
+        ]
+        self.assertEqual(self._run(*base, "--fail-on", "high")[0], 1)
+
+
 class TestRuleRegistry(unittest.TestCase):
     def test_rule_ids_unique_and_stable(self):
         for rid in RULES:
@@ -917,6 +1048,195 @@ class TestRuleRegistry(unittest.TestCase):
         rows, cols, rep, issues = run(["A-1,2024-01-01,-5,10,50,1000,30"])
         subset = run_all(rows, cols, rule_ids=["QC010_NEGATIVE_RATE"])
         self.assertEqual(ids(subset), ["QC010_NEGATIVE_RATE"])
+
+
+class TestLicenseCli(unittest.TestCase):
+    """The CLI licence gate, exercised the way a customer hits it.
+
+    Tokens are signed with a throwaway key and the embedded key is patched for
+    the duration of each test, so these do not depend on whichever public key
+    ships in a given build.
+    """
+
+    SEED = b"\x5a" * 32
+
+    def setUp(self):
+        import os
+
+        self._saved = {
+            k: os.environ.get(k) for k in ("HAQL_LICENSE", "HAQL_LICENSE_FILE")
+        }
+        os.environ.pop("HAQL_LICENSE", None)
+        os.environ.pop("HAQL_LICENSE_FILE", None)
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        import os
+
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _run(self, *args) -> tuple[int, str]:
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            code = cli_main(list(args))
+        return code, buf.getvalue()
+
+    def _csv(self) -> Path:
+        p = self.tmp / "daily.csv"
+        p.write_text(
+            "well_id,date,oil\nW-1,2020-01-01,10\nW-1,2020-01-02,11\n",
+            encoding="utf-8",
+        )
+        return p
+
+    def _token(self, **over) -> str:
+        from tests.test_licensing import good_payload, mint
+
+        return mint(good_payload(**over), seed=self.SEED)
+
+    def _license(self, name: str = "license.key", **over) -> Path:
+        p = self.tmp / name
+        p.write_text(self._token(**over), encoding="utf-8")
+        return p
+
+    def _embedded(self):
+        import unittest.mock as mock
+
+        from haql_qc import licensing
+        from tests.test_licensing import public_key
+
+        return mock.patch.object(
+            licensing, "EMBEDDED_PUBLIC_KEY", public_key(self.SEED)
+        )
+
+    def test_status_zero_when_valid(self):
+        lic = self._license()
+        with self._embedded():
+            code, out = self._run("--license-status", "--license-file", str(lic))
+        self.assertEqual(code, 0, out)
+        self.assertIn('"valid": true', out)
+        self.assertIn("Test Operator Ltd", out)
+
+    def test_status_three_when_absent(self):
+        """Exit 3 must be distinguishable from a usage error, which is 2."""
+        code, out = self._run("--license-status")
+        self.assertEqual(code, 3, out)
+        self.assertIn('"valid": false', out)
+
+    def test_status_three_when_tampered(self):
+        import base64
+
+        token = self._token()
+        prefix, payload_b64, sig_b64 = token.split(".")
+        body = json.loads(
+            base64.urlsafe_b64decode(payload_b64 + "=" * (-len(payload_b64) % 4))
+        )
+        body["seats"] = 9999
+        forged = (
+            f"{prefix}."
+            f"{base64.urlsafe_b64encode(json.dumps(body, separators=(',', ':')).encode()).decode().rstrip('=')}."
+            f"{sig_b64}"
+        )
+        p = self.tmp / "forged.key"
+        p.write_text(forged, encoding="utf-8")
+        with self._embedded():
+            code, out = self._run("--license-status", "--license-file", str(p))
+        self.assertEqual(code, 3, out)
+        self.assertIn("signature", out)
+
+    def test_require_license_blocks_with_exit_three(self):
+        code, out = self._run(
+            "-i", str(self._csv()),
+            "-r", str(self.tmp / "a.json"),
+            "--require-license",
+        )
+        self.assertEqual(code, 3, out)
+        self.assertIn("license required", out)
+
+    def test_require_license_writes_no_report_when_blocked(self):
+        """Blocking happens before any work, so no partial output is left."""
+        out_path = self.tmp / "should_not_exist.json"
+        self._run("-i", str(self._csv()), "-r", str(out_path), "--require-license")
+        self.assertFalse(out_path.exists(), "no audit report may be produced")
+
+    def test_require_license_allows_a_valid_license(self):
+        lic = self._license()
+        out_path = self.tmp / "a.json"
+        with self._embedded():
+            code, out = self._run(
+                "-i", str(self._csv()),
+                "-r", str(out_path),
+                "--require-license",
+                "--license-file", str(lic),
+            )
+        self.assertEqual(code, 0, out)
+        self.assertIn("rows=2", out)
+        self.assertTrue(out_path.exists())
+
+    def test_require_license_rejects_an_expired_one(self):
+        lic = self._license(exp="2001-01-01")
+        with self._embedded():
+            code, out = self._run(
+                "-i", str(self._csv()),
+                "-r", str(self.tmp / "a.json"),
+                "--require-license",
+                "--license-file", str(lic),
+            )
+        self.assertEqual(code, 3, out)
+        self.assertIn("expired", out)
+
+    def test_require_license_rejects_a_missing_file(self):
+        code, out = self._run(
+            "-i", str(self._csv()),
+            "-r", str(self.tmp / "a.json"),
+            "--require-license",
+            "--license-file", str(self.tmp / "absent.key"),
+        )
+        self.assertEqual(code, 3, out)
+        self.assertIn("not found", out)
+
+    def test_run_without_the_flag_still_works(self):
+        """The free tier keeps working when the gate is off."""
+        code, out = self._run("-i", str(self._csv()), "-r", str(self.tmp / "a.json"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("rows=2", out)
+
+    def test_license_details_land_in_the_report(self):
+        """An auditor reading the JSON must see which entitlement ran it."""
+        lic = self._license(seats=3, tier="enterprise")
+        out_path = self.tmp / "a.json"
+        with self._embedded():
+            self._run("-i", str(self._csv()), "-r", str(out_path), "--license-file", str(lic))
+        config = json.loads(out_path.read_text(encoding="utf-8"))["config"]
+        block = config["license"]
+        self.assertEqual(block["company"], "Test Operator Ltd")
+        self.assertEqual(block["tier"], "enterprise")
+        self.assertEqual(block["seats"], 3)
+        self.assertTrue(block["valid"])
+        self.assertNotIn("code", block, "the token itself must not be embedded")
+
+    def test_no_license_means_no_license_block(self):
+        out_path = self.tmp / "a.json"
+        self._run("-i", str(self._csv()), "-r", str(out_path))
+        config = json.loads(out_path.read_text(encoding="utf-8"))["config"]
+        self.assertNotIn("license", config, "an absent licence means no block")
+
+    def test_expired_license_is_still_recorded_with_valid_false(self):
+        """Recording why a licence failed matters more than omitting it."""
+        lic = self._license(exp="2001-01-01")
+        out_path = self.tmp / "a.json"
+        with self._embedded():
+            self._run("-i", str(self._csv()), "-r", str(out_path), "--license-file", str(lic))
+        block = json.loads(out_path.read_text(encoding="utf-8"))["config"]["license"]
+        self.assertFalse(block["valid"])
+        self.assertEqual(block["expires"], "2001-01-01")
 
 
 if __name__ == "__main__":

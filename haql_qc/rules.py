@@ -447,7 +447,7 @@ def r014_shutin(
                     message=(
                         f"{uptime_col} = 0 but '{col}' = {v:g}, "
                         f"{ratio:.0%} of this well's typical {baseline:g}; "
-                        f"the well cannot be producing"
+                        f"the well cannot be {'injecting' if _is_injection(col) else 'producing'}"
                     ),
                     source_row=r.line,
                     column=col,
@@ -456,7 +456,7 @@ def r014_shutin(
                     unit=_unit_for(col, unit_declarations),
                     suggestion=(
                         f"either {uptime_col} is wrong or '{col}' is. "
-                        "Shut-in should report zero across all rate columns"
+                        "A shut-in well should report zero across all rate columns"
                     ),
                     original_value=r.raw.get(col),
                     context={
@@ -496,10 +496,14 @@ def _uptime(r: Row) -> tuple[str | None, float | None]:
     Returns ``(None, None)`` when the row carries no uptime signal at all, so
     the caller can stay silent rather than assume a well was shut in.
 
-    ``days_on`` is preferred when both are present, because a day count is the
-    stronger statement of intent. Within the hours convention, an exact token
-    match beats a substring match, so a column like ``AVG_ON_HRS`` is not
-    mistaken for the well's own uptime.
+    ``days_on`` is preferred when both are present, because a day count is
+    the stronger statement of intent. Within the hours convention, an exact
+    token match beats a substring match, so a column like ``AVG_ON_HRS`` is
+    not mistaken for the well's own uptime.
+
+    Matching is token-based, so spacing and case do not matter. Volve's
+    monthly export writes ``On Stream`` with a space and no unit suffix, and
+    that is the well's uptime for the month.
     """
     days_col = days_val = None
     for col, v in r.values.items():
