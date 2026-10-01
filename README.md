@@ -1,4 +1,4 @@
-# volve-qc
+# haql-qc
 
 Deterministic data-quality checks for oil and gas production data, with an
 audit trail you can hand to someone who did not run the tool.
@@ -28,7 +28,7 @@ and no randomness. The same bytes always produce the same report.
 ## Install
 
 ```bash
-pip install volve-qc
+pip install haql-qc
 ```
 
 Or from a checkout:
@@ -42,7 +42,7 @@ Python 3.9+. Zero runtime dependencies — standard library only.
 ## Quick start
 
 ```bash
-volve-qc -i production.csv \
+haql-qc -i production.csv \
          --well-column WELL_BORE_CODE \
          --date-column DATEPRD \
          --declare-unit BORE_OIL_VOL=Sm3 \
@@ -122,7 +122,7 @@ check never looks like a clean one.
 | `QC015_IMPLAUSIBLE_RATE` | medium | rate exceeds physical plausibility ceiling |
 | `QC016_CUMULATE_JUMP` | medium | implied daily rate from cumulative change is implausible |
 
-`volve-qc --list-rules` prints the same table at runtime.
+`haql-qc --list-rules` prints the same table at runtime.
 
 Run a subset with repeatable `--rule QC012_DATE_GAP`.
 
@@ -188,7 +188,7 @@ always goes to a file; `-r -` does not mean stdout and would create a file
 named `-`.
 
 ```bash
-volve-qc -i production.csv --format jsonl -r audit.jsonl \
+haql-qc -i production.csv --format jsonl -r audit.jsonl \
   && jq -r 'select(.severity=="high") | "\(.well_id) \(.date) \(.message)"' audit.jsonl
 ```
 
@@ -202,7 +202,7 @@ rule changes what it fires on or claims — including this release, where
 ## Library use
 
 ```python
-from volve_qc import load_production_csv, run_all
+from haql_qc import load_production_csv, run_all
 
 rows, columns, report = load_production_csv("production.csv", well_column="WELL_BORE_CODE")
 report.extend(run_all(rows, columns, unit_declarations={"BORE_OIL_VOL": "Sm3"}))

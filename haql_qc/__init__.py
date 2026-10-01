@@ -1,4 +1,4 @@
-"""volve-qc: production data QC and reconciliation with an audit trail."""
+"""haql-qc: production data QC and reconciliation with an audit trail."""
 
 from .schema import AuditReport, Correction, Issue, Severity
 from .loader import load_production_csv

@@ -10,17 +10,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from volve_qc.cli import main as cli_main
-from volve_qc.loader import load_production_csv
-from volve_qc.rules import (
+from haql_qc.cli import main as cli_main
+from haql_qc.loader import load_production_csv
+from haql_qc.rules import (
     RULES,
     _is_injection,
     _rate_kind,
     _volume_unit,
     run_all,
 )
-from volve_qc.schema import AuditReport, Correction, Issue, Severity
-from volve_qc.units import normalise_unit_token, to_canonical_rate
+from haql_qc.schema import AuditReport, Correction, Issue, Severity
+from haql_qc.units import normalise_unit_token, to_canonical_rate
 
 
 HEADER = "well_id,date,oil_bbl_per_d,water_bbl_per_d,gas_mcf_per_d,oil_cum_bbl,days_on"
@@ -291,7 +291,7 @@ class TestSchema(unittest.TestCase):
 
     def test_report_json_and_jsonl(self):
         rep = AuditReport(
-            tool="volve-qc",
+            tool="haql-qc",
             tool_version="0.1.0",
             input_path="/x",
             input_sha256="deadbeef",
@@ -468,7 +468,7 @@ class TestPhysicalRules(unittest.TestCase):
         so a file exceeding MAX_ROWS crashed with NameError instead of
         recording a QC000 finding. Same for the oversize-cell path.
         """
-        import volve_qc.loader as loader_mod
+        import haql_qc.loader as loader_mod
 
         original = loader_mod.MAX_ROWS
         loader_mod.MAX_ROWS = 2
@@ -485,7 +485,7 @@ class TestPhysicalRules(unittest.TestCase):
 
     def test_oversize_cell_reports_issue_not_crash(self):
         """Same guard, cell-size branch."""
-        import volve_qc.loader as loader_mod
+        import haql_qc.loader as loader_mod
 
         original = loader_mod.MAX_CELL_BYTES
         loader_mod.MAX_CELL_BYTES = 16
@@ -511,7 +511,7 @@ class TestPhysicalRules(unittest.TestCase):
         """Spreadsheet exports hand back typed cells, not strings."""
         from datetime import datetime
 
-        from volve_qc.loader import normalise_date
+        from haql_qc.loader import normalise_date
 
         self.assertEqual(normalise_date(datetime(2014, 4, 7, 0, 0)), "2014-04-07")
         self.assertEqual(normalise_date("2014-04-07 00:00:00"), "2014-04-07")
@@ -674,36 +674,36 @@ class TestVersionConsistency(unittest.TestCase):
     """Audit records quote these numbers, so they must not drift apart."""
 
     def test_version_consistency(self):
-        import volve_qc
-        from volve_qc import _version
+        import haql_qc
+        from haql_qc import _version
 
-        self.assertEqual(volve_qc.__version__, _version.__version__)
-        self.assertEqual(volve_qc.TOOL_VERSION, _version.__version__)
-        self.assertEqual(volve_qc.RULESET_VERSION, _version.RULESET_VERSION)
-        self.assertEqual(volve_qc.TOOL, _version.TOOL)
+        self.assertEqual(haql_qc.__version__, _version.__version__)
+        self.assertEqual(haql_qc.TOOL_VERSION, _version.__version__)
+        self.assertEqual(haql_qc.RULESET_VERSION, _version.RULESET_VERSION)
+        self.assertEqual(haql_qc.TOOL, _version.TOOL)
 
     def test_report_defaults_to_current_ruleset(self):
         """A hand-built report must not silently claim an old ruleset."""
-        import volve_qc
+        import haql_qc
 
         rep = AuditReport(
-            tool="volve-qc",
+            tool="haql-qc",
             tool_version="0.0.0",
             input_path="x",
             input_sha256="y",
             run_started="z",
         )
-        self.assertEqual(rep.ruleset_version, volve_qc.RULESET_VERSION)
+        self.assertEqual(rep.ruleset_version, haql_qc.RULESET_VERSION)
 
     def test_loaded_report_records_both_versions(self):
-        import volve_qc
+        import haql_qc
 
         rows, cols, rep = load_production_csv(
             write_csv(["A-1,2024-01-01,100,10,50,1000,1"])
         )
         payload = json.loads(rep.to_json())
-        self.assertEqual(payload["tool_version"], volve_qc.__version__)
-        self.assertEqual(payload["ruleset_version"], volve_qc.RULESET_VERSION)
+        self.assertEqual(payload["tool_version"], haql_qc.__version__)
+        self.assertEqual(payload["ruleset_version"], haql_qc.RULESET_VERSION)
 
 
 class TestCliContract(unittest.TestCase):

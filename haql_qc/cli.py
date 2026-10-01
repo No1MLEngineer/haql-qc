@@ -1,4 +1,4 @@
-"""CLI: volve-qc --input production.csv --report audit.json
+"""CLI: haql-qc --input production.csv --report audit.json
 
 Read-only by default. --fix writes corrected values to a separate output file;
 the input is never modified.
@@ -53,13 +53,13 @@ def _parse_unit_declarations(raw: list[str] | None) -> dict[str, str] | None:
 
 
 def _fail(msg: str) -> int:
-    print(f"volve-qc: {msg}", file=sys.stderr)
+    print(f"haql-qc: {msg}", file=sys.stderr)
     return 2
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        prog="volve-qc",
+        prog="haql-qc",
         description="Production data QC and reconciliation with an audit trail.",
     )
     p.add_argument(

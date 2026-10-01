@@ -10,14 +10,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fixtures.volve_like import EXPECTED_FINDINGS, HEADER, ROWS
-from volve_qc.loader import load_production_csv
-from volve_qc.rules import run_all
+from fixtures.haql_like import EXPECTED_FINDINGS, HEADER, ROWS
+from haql_qc.loader import load_production_csv
+from haql_qc.rules import run_all
 
 
 def build() -> Path:
     d = Path(tempfile.mkdtemp())
-    p = d / "volve_like.csv"
+    p = d / "haql_like.csv"
     p.write_text(HEADER + "\n" + "\n".join(ROWS) + "\n", encoding="utf-8")
     return p
 

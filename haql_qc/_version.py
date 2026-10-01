@@ -24,4 +24,4 @@ __version__ = "0.2.0"
 
 RULESET_VERSION = "1.1.0"
 
-TOOL = "volve-qc"
+TOOL = "haql-qc"
