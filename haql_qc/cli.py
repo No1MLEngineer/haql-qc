@@ -93,6 +93,36 @@ def main(argv: list[str] | None = None) -> int:
         dest="rules",
         help="run only this rule (repeatable); default runs all",
     )
+    p.add_argument(
+        "--ingest",
+        action="store_true",
+        help=(
+            "accept any supported export (.csv, .xlsx, .zip, .json, .jsonl, "
+            ".dbf, .tsv, fixed-width) and map its columns automatically. Off "
+            "by default so a mistyped flag cannot silently change what is read."
+        ),
+    )
+    p.add_argument(
+        "--sheet",
+        help="worksheet to read from an .xlsx workbook (default: the sheet with the most named columns)",
+    )
+    p.add_argument(
+        "--member",
+        help="file inside a .zip to read (default: the highest-ranked data entry)",
+    )
+    p.add_argument(
+        "--convert",
+        metavar="PATH",
+        help=(
+            "write the canonical CSV for --input here and exit without running "
+            "the ruleset. For inspecting how a file was mapped."
+        ),
+    )
+    p.add_argument(
+        "--explain",
+        action="store_true",
+        help="print the inferred column mapping as JSON, then continue",
+    )
     p.add_argument("--list-rules", action="store_true", help="print ruleset and exit")
     p.add_argument("--ceiling-oil", default=0, help="plausibility ceiling, oil rate")
     p.add_argument("--ceiling-water", default=0, help="plausibility ceiling, water rate")
@@ -126,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         "--license-file",
         help=(
             "path to a signed HAQL1 license. Defaults to $HAQL_LICENSE_FILE, "
-            "then $HAQL_LICENSE, then ~/.haql/license.key."
+            "then $HAQL_LICENSE, then ~/.config/haql/license.key."
         ),
     )
     p.add_argument(
@@ -167,11 +197,12 @@ def main(argv: list[str] | None = None) -> int:
 
         result = licensing.check(args.license_file)
         if not result.valid:
-            detail = result.reason or "no license"
-            src = f" (looked at {result.source})" if result.source else ""
+            # result.reason already names the source when a token was found and
+            # rejected. Appending "looked at" again just repeats it.
             return _fail(
-                f"license required and not satisfied: {detail}{src}. Set "
-                f"$HAQL_LICENSE or pass --license-file.",
+                f"license required and not satisfied: {result.reason}. "
+                f"Set $HAQL_LICENSE, or pass --license-file. "
+                f"Searched: {[str(p) for p in licensing.DEFAULT_LICENSE_PATHS]}.",
                 code=EXIT_NO_LICENSE,
             )
 
@@ -186,7 +217,74 @@ def main(argv: list[str] | None = None) -> int:
 
     input_path = Path(args.input)
 
-    if args.granularity == "period":
+    # ---- ingest path ----------------------------------------------------
+    # Any supported export in, canonical CSV plus a manifest. This runs before
+    # the format-specific loaders so that --ingest never has to guess which one
+    # the file needs.
+    if args.ingest or args.convert or args.explain:
+        try:
+            from .ingest import IngestError, ingest_file, manifest_json
+
+            result = ingest_file(
+                input_path,
+                well_column=args.well_column if args.well_column != "well_id" else None,
+                date_column=args.date_column if args.date_column != "date" else None,
+                year_column=args.year_column if args.year_column != "Year" else None,
+                month_column=args.month_column if args.month_column != "Month" else None,
+                sheet=args.sheet,
+                member=args.member,
+            )
+        except IngestError as e:
+            return _fail(str(e))
+        except Exception as e:  # noqa: BLE001
+            return _fail(f"failed to read input: {e}")
+
+        if args.explain:
+            print(manifest_json(result))
+
+        if args.convert:
+            out = Path(args.convert)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(result.csv_text, encoding="utf-8")
+            sm = result.schema
+            print(f"{result.detection.format} -> {out} ({len(result.table.rows)} rows)")
+            print(f"  well={sm.column_for('well')} date={sm.column_for('date')}")
+            print(f"  cadence={sm.cadence.granularity} ({sm.cadence.basis})")
+            if sm.unresolved:
+                print(f"  unresolved: {sm.unresolved}")
+            for w in result.warnings:
+                print(f"  warning: {w}")
+            return 0
+
+        # ---- load -----------------------------------------------------------
+    # Two routes into the same ruleset. With --ingest the file goes straight to
+    # loader Rows via the ingest layer, so the audit record names and hashes the
+    # file the operator actually handed over. Routing it through a temporary CSV
+    # instead would put a path nobody can open into the report, which defeats
+    # the point of an audit trail.
+    ingest_rows = None
+    if args.ingest:
+        try:
+            from .ingest import IngestError, load_any
+
+            ingest_rows = load_any(
+                input_path,
+                well_column=args.well_column if args.well_column != "well_id" else None,
+                date_column=args.date_column if args.date_column != "date" else None,
+                year_column=args.year_column if args.year_column != "Year" else None,
+                month_column=args.month_column if args.month_column != "Month" else None,
+                sheet=args.sheet,
+                member=args.member,
+            )
+        except IngestError as e:
+            return _fail(str(e))
+        except Exception as e:  # noqa: BLE001
+            return _fail(f"failed to read input: {e}")
+
+    if ingest_rows is not None:
+        rows, columns, report = ingest_rows
+        file_units = report.config.get("units_declared_by_file") or None
+    elif args.granularity == "period":
         try:
             rows, columns, file_units = load_period_csv(
                 input_path,

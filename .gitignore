@@ -11,3 +11,9 @@ __pycache__/
 *.xlsx
 audit.json
 -
+
+# License issuance keys. The public key is embedded in the package and
+# committed; the private key must never reach the repository.
+haql-issuer/
+*.pem
+license.key

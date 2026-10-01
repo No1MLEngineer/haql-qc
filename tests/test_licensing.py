@@ -21,6 +21,7 @@ from datetime import date
 from pathlib import Path
 
 from haql_qc.licensing import (
+    DEFAULT_LICENSE_PATHS,
     EMBEDDED_PUBLIC_KEY,
     TIERS,
     License,
@@ -383,19 +384,35 @@ class TestDiscovery(unittest.TestCase):
             self.assertTrue(r.reason, "a failed check must explain itself")
 
     def test_a_non_haql_file_at_the_default_path_is_reported_clearly(self):
-        """The build machine holds a v=1 semicolon-format key at the default path.
+        """A wrong-format key sitting at a search path must name itself.
 
         Finding it and saying so is correct behaviour. Silently ignoring it, or
-        crashing, would not be.
+        crashing, would not be. This matters in practice: the build machine has
+        a ``v=1`` semicolon-format key at ``~/.haql/license.key`` belonging to a
+        different tool, which is exactly why haql-qc does not search there.
+
+        The path is passed explicitly rather than relied on via the search list,
+        so the assertion tests the reporting and not this machine's home dir.
         """
         p = Path.home() / ".haql" / "license.key"
         if not p.exists() or p.read_text(encoding="utf-8").startswith("HAQL1."):
-            self.skipTest("no legacy-format key at the default path")
-        os.environ.pop("HAQL_LICENSE", None)
-        os.environ.pop("HAQL_LICENSE_FILE", None)
-        r = check(public_key=TEST_PUB)
+            self.skipTest("no legacy-format key available to test against")
+        r = check(p, public_key=TEST_PUB)
         self.assertFalse(r.valid)
         self.assertIn("HAQL1", r.reason)
+        self.assertIn(str(p), r.reason)
+
+    def test_the_default_search_path_does_not_claim_a_shared_dot_directory(self):
+        """``~/.haql`` belongs to another tool on this machine.
+
+        Searching it would mean reading another program's private files and then
+        reporting its contents as a licensing failure, so the dot-directory is
+        deliberately absent from the search list.
+        """
+        searched = [str(p) for p in DEFAULT_LICENSE_PATHS]
+        self.assertNotIn(str(Path.home() / ".haql"), searched)
+        for p in DEFAULT_LICENSE_PATHS:
+            self.assertTrue(str(p).startswith(str(Path.home())))
 
 
 class TestRevocation(unittest.TestCase):

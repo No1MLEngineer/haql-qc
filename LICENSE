@@ -1,11 +1,13 @@
 haql-qc — Proprietary License
-Copyright (c) 2026 [COPYRIGHT HOLDER TO BE FILLED IN]
+Copyright (c) 2026 haql
 
 All rights reserved.
 
-NOTICE: The copyright holder line above is a placeholder and has not been
-set. Do not distribute this software, publish it, or grant any rights under
-it until that line names a real legal entity or person.
+NOTICE: This is a proprietary, source-available license. The full Python
+source is published so that users can inspect exactly what the tool does to
+their production data. Publishing the source is not a grant of open-source
+rights. Running the software requires a license key issued by the Licensor,
+and the restrictions in Section 2 apply to the source as well as the binary.
 
 ------------------------------------------------------------------------------
 
@@ -21,8 +23,10 @@ rights are granted.
 You may not, without a separate written agreement with the Licensor:
 
   a. copy, redistribute, sublicense, or make the Software available to any
-     third party, including hosting it on a public repository or package
-     index;
+     third party. The Licensor publishes the source itself at
+     https://github.com/haql/haql-qc and on the Python Package Index under
+     the name "haql-qc"; that publication is authorised, and this clause
+     governs redistribution by anyone else;
   b. modify, adapt, translate, or create derivative works of the Software;
   c. reverse engineer, decompile, disassemble, or attempt to derive the
      source code of the Software, except to the extent such restriction is

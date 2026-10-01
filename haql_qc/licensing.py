@@ -40,20 +40,30 @@ LICENSE_PREFIX = "HAQL1"
 
 # The ed25519 public key that verifies issued licenses.
 #
-# CONFIRM BEFORE SHIPPING: this value was recovered from the issuer's key pair
-# on the build machine and matches exactly one token in the local registry. If
-# the issuer rotated keys after that, this must be replaced with the current
-# key or every legitimate customer will be rejected.
+# This is the public half of the issuer keypair held at ~/.haql-issuer/. The
+# private half never enters the repository, the wheel, or this process. Every
+# license token carries a nonce; see tools/haql_license.py to issue one.
+#
+# KEY ROTATION: replacing this value invalidates every license already issued
+# under the previous key, so rotate deliberately and keep the old public key
+# available for re-verification of historical audit reports.
 EMBEDDED_PUBLIC_KEY = bytes.fromhex(
-    "080f5a7d8d915a7c44d047bc97244deded5f6a8af277ec313652da217350c063"
+    "e04960825188a57cc0d8beb2cfca524119950a9d23aa8eef77613f2dc4ac7cbc"
 )
 
 TIERS = ("desktop", "team", "enterprise")
 
 LICENSE_ENV_VAR = "HAQL_LICENSE"
 LICENSE_PATH_ENV_VAR = "HAQL_LICENSE_FILE"
+
+# Deliberately NOT ~/.haql/. That directory is not ours to claim: on developer
+# machines it holds the `mem` encrypted-memory store (config.json, memory.json,
+# runs.jsonl), and in the field it may well hold something else entirely. A tool
+# that drops files into a shared dot-directory will eventually collide with
+# another tool that owns the same name, and the symptom will look like a corrupt
+# license rather than a namespace clash.
 DEFAULT_LICENSE_PATHS = (
-    Path.home() / ".haql" / "license.key",
+    Path.home() / ".config" / "haql" / "license.key",
     Path.home() / ".haql-license" / "license.key",
 )
 
@@ -252,7 +262,9 @@ def parse_token(token: str) -> tuple[dict[str, Any], bytes, bytes]:
         )
     prefix, payload_b64, sig_b64 = parts
     if prefix != LICENSE_PREFIX:
-        raise LicenseError(f"unknown license format {prefix!r}, expected {LICENSE_PREFIX}")
+        raise LicenseError(
+            f"unknown license format {prefix!r}, expected {LICENSE_PREFIX}"
+        )
     raw = _b64url_decode(payload_b64)
     signature = _b64url_decode(sig_b64)
     if len(signature) != 64:
@@ -310,7 +322,8 @@ def verify_token(
 
     if tier not in TIERS:
         return LicenseCheck(
-            valid=False, reason=f"unknown tier {tier!r}, expected one of {', '.join(TIERS)}"
+            valid=False,
+            reason=f"unknown tier {tier!r}, expected one of {', '.join(TIERS)}",
         )
 
     lic = License(
@@ -328,7 +341,10 @@ def verify_token(
         return LicenseCheck(
             valid=False,
             license=lic,
-            reason=f"license expired {lic.expires} ({lic.days_remaining(today)} days ago)",
+            reason=(
+                f"license expired {lic.expires} "
+                f"({lic.days_remaining(today)} days ago)"
+            ),
         )
     return LicenseCheck(valid=True, license=lic)
 
@@ -379,10 +395,18 @@ def check(
     if not text:
         return LicenseCheck(
             valid=False,
-            reason=f"no license found (set ${LICENSE_ENV_VAR} or ~/.haql/license.key)",
+            reason=(
+                f"no license found in any of "
+                f"{[str(p) for p in DEFAULT_LICENSE_PATHS]}"
+            ),
         )
     result = verify_token(text, public_key=key, today=today)
     result.source = source
+    if not result.valid and (result.reason or "").startswith("malformed license"):
+        # Say where the junk came from. "malformed license" with no path is
+        # unactionable -- the operator cannot tell which of three lookup
+        # locations to go and clear.
+        result.reason = f"{result.reason} (read from {source})"
     return result
 
 

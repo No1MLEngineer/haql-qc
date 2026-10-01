@@ -8,8 +8,7 @@ description = "Local-first production data QC for reservoir engineering. Determi
 readme = "README.md"
 requires-python = ">=3.9"
 dynamic = ["version"]
-authors = [{ name = "haql-qc contributors" }]
-# Copyright holder is unresolved. See the NOTICE block at the top of LICENSE.
+authors = [{ name = "haql" }]
 license = { file = "LICENSE" }
 keywords = ["oil", "gas", "production", "data-quality", "reservoir", "volve"]
 classifiers = [
@@ -40,7 +39,18 @@ path = "haql_qc/_version.py"
 packages = ["haql_qc"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.2.0", "ruff>=0.6.0", "mypy>=1.10.0"]
+# Spreadsheet support is the only non-stdlib dependency, and only the
+# ingest path needs it. The audit engine itself remains stdlib-only.
+xlsx = ["openpyxl>=3.1.0"]
+# cryptography is dev-only and never reaches an installed wheel. It exists so
+# the pure-Python issuer signer can be differentially tested against a reference
+# implementation; without it that test skips and the signer goes unverified.
+dev = [
+    "pytest>=8.2.0",
+    "ruff>=0.6.0",
+    "mypy>=1.10.0",
+    "cryptography>=42.0.0",
+]
 
 [tool.ruff]
 line-length = 88

@@ -28,13 +28,31 @@ and no randomness. The same bytes always produce the same report.
 
 ## Install
 
-haql-qc is not on PyPI yet. From a checkout:
-
 ```bash
-pip install -e ".[dev]"
+pip install haql-qc
 ```
 
-Python 3.9+. Zero runtime dependencies — standard library only.
+Python 3.9 or newer. The audit engine runs on the standard library alone. Reading
+spreadsheets needs one optional dependency:
+
+```bash
+pip install "haql-qc[xlsx]"
+```
+
+## License
+
+haql-qc is proprietary and source-available. The full Python source is published
+so you can read exactly what the tool does to your production data, and running
+it requires a license key issued by the vendor. To use it:
+
+```bash
+haql-qc --license-status           # checks $HAQL_LICENSE, then ~/.haql/license.key
+export HAQL_LICENSE='HAQL1....'    # or write the token to ~/.haql/license.key
+haql-qc --require-license -i production.csv -r audit.json
+```
+
+Licenses are signed ed25519 tokens carrying company, tier, seats, and expiry.
+Verification is entirely offline and needs no network call. See `LICENSE`.
 
 ## Quick start
 
