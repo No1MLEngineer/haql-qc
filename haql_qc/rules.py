@@ -13,6 +13,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import date as _date
 from datetime import timedelta
+from statistics import median
 from typing import Callable, Iterable
 
 from .loader import Row
@@ -21,6 +22,14 @@ from .units import CANONICAL_UNIT, UNIT_TOKENS, to_canonical_rate
 
 Rule = Callable[..., list[Issue]]
 """A rule takes (rows) and may optionally take (columns, ceilings)."""
+
+MATERIAL_RATIO = 0.05
+"""Fraction of a well's own median output above which a value is material.
+
+Relative to the well rather than an absolute number, because a rate that is
+trivial for one well can be an anomaly for another. 5% is deliberately low:
+below it a value is rounding noise, above it an operator would want to know.
+"""
 
 RULES: dict[str, Rule] = {}
 RULE_META: dict[str, dict] = {}
@@ -196,7 +205,7 @@ def r010_negative(
                         column=col,
                         observed=v,
                         expected=">= 0",
-                        unit=_unit_for(col),
+                        unit=_unit_for(col, unit_declarations),
                         suggestion=(
                             "some exports record injection as negative; confirm the "
                             "field's sign convention before correcting"
@@ -248,7 +257,7 @@ def r011_rollover(
                             column=col,
                             observed=cv,
                             expected=f">= previous value {pv:,.1f}",
-                            unit=_unit_for(col),
+                            unit=_unit_for(col, unit_declarations),
                             suggestion="meter rollover, reallocation, or wrong column; confirm against allocation report",
                             original_value=r.raw.get(col),
                             context={"previous_value": pv, "previous_row": pr.line},
@@ -372,48 +381,144 @@ def r013_days_on(
     return out
 
 
-@rule("QC014_SHUTIN_PRODUCTION", description="days_on = 0 but rates are non-zero", default_severity=Severity.HIGH)
+@rule(
+    "QC014_SHUTIN_PRODUCTION",
+    description="well not producing (days_on or on-stream hours = 0) but a rate is non-zero",
+    default_severity=Severity.HIGH,
+)
 def r014_shutin(
     rows: Iterable[Row],
     columns: list[str] | None = None,
     ceilings: dict[str, float] | None = None,
     unit_declarations: dict[str, str] | None = None,
 ) -> list[Issue]:
+    """A shut-in well cannot be producing.
+
+    Both common uptime conventions are read, because exports disagree and
+    matching only one of them means the check silently never runs on half the
+    industry's data:
+
+    * ``days_on`` -- a day count, where ``0`` means no production days
+    * ``ON_STREAM_HRS`` -- hours, where ``0`` or a missing value means the
+      well was not on stream
+
+    A well that reports zero uptime *and* a material volume is reporting two
+    facts that cannot both be true. One of them is wrong, and the tool cannot
+    tell which, so it names both the uptime column and the volume column.
+
+    "Material" is measured against the well's own history for that column
+    rather than an absolute threshold, because 0.003 Sm3 of water is a
+    rounding artefact next to a well that injects 6000 Sm3/d, and the same
+    number would be a crisis for a well that produces 5. Rows whose volume is
+    a trivial fraction of that well's own typical output are reported at INFO
+    rather than HIGH, so the material contradictions stay visible.
+    """
+    baselines = _per_well_medians(rows)
     out = []
     for r in rows:
-        days_on = None
-        for col, v in r.values.items():
-            if "days_on" in col.lower():
-                days_on = v
-                break
-        if days_on is None or days_on > 0:
+        uptime_col, uptime_val = _uptime(r)
+        if uptime_col is None or uptime_val is None or uptime_val > 0:
             continue
         producing = [
             (c, v)
             for c, v in r.values.items()
             if v is not None
             and v > 0
-            and "days_on" not in c.lower()
+            and c != uptime_col
             and _is_rate_column(c)
         ]
         for col, v in producing:
+            baseline = baselines.get((r.well_id, col))
+            # Without a baseline we cannot judge materiality, so we stay
+            # quiet rather than guess a threshold that belongs to the operator.
+            if baseline is None or baseline <= 0:
+                continue
+            ratio = v / baseline
+            if ratio < MATERIAL_RATIO:
+                severity = Severity.INFO
+            else:
+                severity = Severity.HIGH
             out.append(
                 Issue(
                     rule_id="QC014_SHUTIN_PRODUCTION",
                     well_id=r.well_id,
                     date=r.date,
-                    severity=Severity.HIGH,
-                    message=f"days_on = 0 but '{col}' = {v:g}",
+                    severity=severity,
+                    message=(
+                        f"{uptime_col} = 0 but '{col}' = {v:g}, "
+                        f"{ratio:.0%} of this well's typical {baseline:g}; "
+                        f"the well cannot be producing"
+                    ),
                     source_row=r.line,
                     column=col,
                     observed=v,
                     expected="0 when the well is not producing",
-                    unit=_unit_for(col),
-                    suggestion="shut-in should report zero across all rate columns",
+                    unit=_unit_for(col, unit_declarations),
+                    suggestion=(
+                        f"either {uptime_col} is wrong or '{col}' is. "
+                        "Shut-in should report zero across all rate columns"
+                    ),
                     original_value=r.raw.get(col),
+                    context={
+                        "uptime_column": uptime_col,
+                        "uptime_value": uptime_val,
+                        "volume_column": col,
+                        "volume_value": v,
+                        "well_median_for_column": baseline,
+                        "ratio_to_well_median": round(ratio, 4),
+                        "material": ratio >= MATERIAL_RATIO,
+                    },
                 )
             )
     return out
+
+
+def _per_well_medians(rows: Iterable[Row]) -> dict[tuple[str, str], float]:
+    """Median positive value per (well, column), for materiality comparisons.
+
+    Only rows where the well reports *some* uptime contribute, so a bad
+    uptime reading cannot define the baseline that judges it.
+    """
+    acc: dict[tuple[str, str], list[float]] = defaultdict(list)
+    for r in rows:
+        uptime_col, uptime_val = _uptime(r)
+        if uptime_col is None or uptime_val is None or uptime_val <= 0:
+            continue
+        for col, v in r.values.items():
+            if v is not None and v > 0 and _is_rate_column(col):
+                acc[(r.well_id, col)].append(v)
+    return {k: median(vals) for k, vals in acc.items() if vals}
+
+
+def _uptime(r: Row) -> tuple[str | None, float | None]:
+    """The row's uptime column and value, across naming conventions.
+
+    Returns ``(None, None)`` when the row carries no uptime signal at all, so
+    the caller can stay silent rather than assume a well was shut in.
+
+    ``days_on`` is preferred when both are present, because a day count is the
+    stronger statement of intent. Within the hours convention, an exact token
+    match beats a substring match, so a column like ``AVG_ON_HRS`` is not
+    mistaken for the well's own uptime.
+    """
+    days_col = days_val = None
+    for col, v in r.values.items():
+        if "days_on" in col.lower() or col.lower() in ("days", "day_count"):
+            days_col, days_val = col, v
+            break
+    if days_col is not None:
+        return days_col, days_val
+
+    # Hours convention: exact names first, then the looser substring test.
+    exact = ("on_stream_hrs", "onstream_hours", "uptime", "uptime_hrs", "hours")
+    for col, v in r.values.items():
+        if col.lower() in exact:
+            return col, v
+    for col, v in r.values.items():
+        c = col.lower()
+        if "stream" in c or "on_hrs" in c or "uptime" in c:
+            return col, v
+    return None, None
 
 
 @rule("QC015_IMPLAUSIBLE_RATE", description="Rate exceeds physical plausibility ceiling", default_severity=Severity.MEDIUM)
@@ -785,14 +890,21 @@ def _period_days(r: Row, column: str) -> float | None:
     return None
 
 
-def _unit_for(column: str) -> str | None:
-    """Best-effort unit label, inferred from the column name.
+def _unit_for(
+    column: str,
+    unit_declarations: dict[str, str] | None = None,
+) -> str | None:
+    """Unit label for a column: a declaration first, the name second.
 
-    This is a reporting aid, not a measurement. Naming a column ``MCF/d`` when
-    the file actually holds Sm3 is worse than saying nothing, so an explicit
-    metric token in the name wins and a volumetric name with no cadence
-    resolves to a bare volume unit.
+    A declaration beats inference, because the operator's statement outranks
+    our reading of a column name. This is a reporting aid, not a measurement:
+    naming a column ``MCF/d`` when the file actually holds Sm3 is worse than
+    saying nothing, so an explicit metric token in the name wins and a
+    volumetric name with no cadence resolves to a bare volume unit.
     """
+    declared = (unit_declarations or {}).get(column)
+    if declared:
+        return declared
     c = column.lower()
     vol = _volume_unit(c)
     if _is_cumulative(c):

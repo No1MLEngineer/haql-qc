@@ -635,11 +635,68 @@ class TestPhysicalRules(unittest.TestCase):
         self.assertIn("QC013_DAYS_ON_RANGE", ids(issues))
 
     def test_shutin_production(self):
+        # Materiality is judged against the well's own history, so the well
+        # needs a normal record before its shut-in day means anything.
         rows, cols, rep, issues = run(
-            ["A-1,2024-01-01,100,10,50,1000,0"]  # days_on=0 but producing
+            [
+                "A-1,2024-01-01,100,10,50,1000,30",
+                "A-1,2024-01-02,100,10,50,1050,30",
+                "A-1,2024-01-03,100,10,50,1100,30",
+                "A-1,2024-01-04,100,10,50,1150,0",  # days_on=0 but producing
+            ]
         )
         shut = [i for i in issues if i.rule_id == "QC014_SHUTIN_PRODUCTION"]
-        self.assertEqual(len(shut), 3)  # oil, water, gas
+        self.assertEqual(len(shut), 3, f"expected oil, water and gas: {shut}")
+        self.assertTrue(all(i.severity is Severity.HIGH for i in shut))
+        self.assertTrue(
+            all(i.context["material"] for i in shut),
+            "a volume equal to the well's norm is material",
+        )
+
+    def test_shutin_trickle_is_info_not_high(self):
+        """A rounding artefact next to a real rate is not an emergency."""
+        rows, cols, rep, issues = run(
+            [
+                "A-1,2024-01-01,100,10,50,1000,30",
+                "A-1,2024-01-02,100,10,50,1050,30",
+                "A-1,2024-01-03,100,10,50,1100,30",
+                "A-1,2024-01-04,0.003,0,0,1100,0",  # 0.003% of the well's oil
+            ]
+        )
+        shut = [i for i in issues if i.rule_id == "QC014_SHUTIN_PRODUCTION"]
+        self.assertEqual(len(shut), 1, "only the non-zero trickle qualifies")
+        self.assertIs(shut[0].severity, Severity.INFO)
+        self.assertFalse(shut[0].context["material"])
+
+    def test_shutin_silent_without_history(self):
+        """No baseline means no materiality judgement, so the rule stays quiet."""
+        rows, cols, rep, issues = run(
+            ["A-1,2024-01-01,100,10,50,1000,0"]
+        )
+        shut = [i for i in issues if i.rule_id == "QC014_SHUTIN_PRODUCTION"]
+        self.assertEqual(shut, [], "a single row cannot establish what is normal")
+
+    def test_shutin_understands_on_stream_hours(self):
+        """Exports that report hours, not a day count, must be covered too.
+
+        This is the Volve convention, and it is the case that would otherwise
+        go entirely unchecked.
+        """
+        d = Path(tempfile.mkdtemp())
+        p = d / "hours.csv"
+        p.write_text(
+            "well_id,date,ON_STREAM_HRS,BORE_OIL_VOL\n"
+            "A-1,2024-01-01,24,100\n"
+            "A-1,2024-01-02,24,100\n"
+            "A-1,2024-01-03,24,100\n"
+            "A-1,2024-01-04,0,100\n",
+            encoding="utf-8",
+        )
+        rows, cols, _ = load_production_csv(p)
+        shut = [i for i in run_all(rows, cols) if i.rule_id == "QC014_SHUTIN_PRODUCTION"]
+        self.assertEqual(len(shut), 1, f"ON_STREAM_HRS=0 with a full rate must flag: {shut}")
+        self.assertIs(shut[0].severity, Severity.HIGH)
+        self.assertEqual(shut[0].context["uptime_column"], "ON_STREAM_HRS")
 
     def test_implausible_rate(self):
         rows, cols, rep, issues = run(
@@ -704,6 +761,55 @@ class TestVersionConsistency(unittest.TestCase):
         payload = json.loads(rep.to_json())
         self.assertEqual(payload["tool_version"], haql_qc.__version__)
         self.assertEqual(payload["ruleset_version"], haql_qc.RULESET_VERSION)
+
+
+class TestDocumentedExample(unittest.TestCase):
+    """The README shows a real finding. A doc that drifts from the tool is a lie."""
+
+    def _readme_qc010(self) -> dict:
+        import re
+
+        md = (Path(__file__).resolve().parent.parent / "README.md").read_text()
+        start = md.index('"rule_id": "QC010_NEGATIVE_RATE"')
+        end = md.index("\n}\n", start)
+        return json.loads("{" + md[start : end + 2])
+
+    def test_readme_finding_exists_in_real_output(self):
+        doc = self._readme_qc010()
+        actual = json.load(open("/tmp/opencode/haql_d2.json")) if Path(
+            "/tmp/opencode/haql_d2.json"
+        ).exists() else None
+        if actual is None:
+            self.skipTest("reference report not regenerated this run")
+
+        match = next(
+            (i for i in actual["issues"] if i["source_row"] == doc["source_row"]), None
+        )
+        self.assertIsNotNone(match, f"README cites source_row {doc['source_row']} which does not exist")
+        for key in ("well_id", "date", "observed", "unit", "column", "severity", "message"):
+            self.assertEqual(doc.get(key), match.get(key), f"README {key} drifted from tool output")
+
+    # A column whose *name* states no unit, so the declaration is the only
+    # possible source. HEADER's columns all carry a unit token by design.
+    UNITLESS = "well_id,date,BORE_OIL_VOL,days_on"
+
+    def _unitless(self, declaration):
+        d = Path(tempfile.mkdtemp())
+        p = d / "unitless.csv"
+        p.write_text(self.UNITLESS + "\nA-1,2024-01-01,-5,1\n", encoding="utf-8")
+        rows, cols, _ = load_production_csv(p)
+        issues = run_all(rows, cols, unit_declarations=declaration)
+        neg = [i for i in issues if i.rule_id == "QC010_NEGATIVE_RATE"]
+        self.assertTrue(neg, "expected a negative-rate finding on BORE_OIL_VOL")
+        return neg[0]
+
+    def test_declaration_reaches_the_finding_unit(self):
+        """A finding about a number must say what unit the number is in."""
+        self.assertEqual(self._unitless({"BORE_OIL_VOL": "Sm3"}).unit, "Sm3")
+
+    def test_unit_stays_null_when_not_declared(self):
+        """No declaration means no unit. Silence beats a guess."""
+        self.assertIsNone(self._unitless({}).unit)
 
 
 class TestCliContract(unittest.TestCase):

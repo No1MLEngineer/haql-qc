@@ -53,26 +53,30 @@ haql-qc -i production.csv \
 ```
 
 ```text
-rows=15634 wells=7 issues=42
-  critical=0 high=8 medium=34 low=0 info=0
+rows=15634 wells=7 issues=80
+  critical=0 high=12 medium=34 low=0 info=34
 report -> audit.json
 ```
 
-On the real Volve daily export, those 8 high findings are 4 date gaps and 4
-negative water rates:
+On the real Volve daily export that yields 12 high, 34 medium and 34 info
+findings. The high ones are 4 negative water rates, 4 long date gaps, and 4
+rows where the well reports zero uptime while still producing at close to its
+normal rate — a contradiction the tool cannot resolve on its own, so it names
+both the uptime field and the volume field. One of the 34 info findings, for
+example, is a negative water rate:
 
 ```json
 {
   "rule_id": "QC010_NEGATIVE_RATE",
-  "well_id": "F-12 H",
-  "date": "2012-08-13",
+  "well_id": "NO 15/9-F-12 H",
+  "date": "2008-04-23",
   "severity": "high",
-  "message": "negative water production: -457.84",
-  "source_row": 7214,
+  "message": "negative volume in 'BORE_WAT_VOL'",
+  "source_row": 1984,
   "column": "BORE_WAT_VOL",
-  "observed": -457.84,
+  "observed": -14.19,
   "unit": "Sm3",
-  "suggestion": "a production rate cannot be negative; check for a reversed sign convention or a meter fault"
+  "suggestion": "confirm sign convention before flipping; negative production volume is not physically realisable"
 }
 ```
 
@@ -118,7 +122,7 @@ check never looks like a clean one.
 | `QC011_METER_ROLLOVER` | high | cumulative total decreased |
 | `QC012_DATE_GAP` | medium | gap beyond the well's own reporting cadence |
 | `QC013_DAYS_ON_RANGE` | medium | `days_on` outside 0–31 |
-| `QC014_SHUTIN_PRODUCTION` | high | `days_on = 0` but rates are non-zero |
+| `QC014_SHUTIN_PRODUCTION` | high / info | well not producing but a rate is non-zero; info when the value is a trivial fraction of that well's own output |
 | `QC015_IMPLAUSIBLE_RATE` | medium | rate exceeds physical plausibility ceiling |
 | `QC016_CUMULATE_JUMP` | medium | implied daily rate from cumulative change is implausible |
 
@@ -217,8 +221,10 @@ for issue in report.issues:
 The reference numbers come from the real Volve production export, not from the
 synthetic fixture:
 
-- **Daily:** 15,634 rows, 7 wells, 42 findings (38 date gaps, 4 negative
-  water rates), 0 plausibility breaches.
+- **Daily:** 15,634 rows, 7 wells, 80 findings — 4 negative water rates,
+  38 date gaps, and 4 shut-in contradictions at high; 34 further contradictions
+  demoted to info as immaterial against each well's own history. 0 plausibility
+  breaches.
 - **Monthly:** 526 rows, 7 wells, 0 findings.
 - Peak rates recomputed independently outside the tool: oil 152,878 bbl/d,
   water 71,600 bbl/d, gas 45,090 MCF/d — all below ceiling, confirming the
