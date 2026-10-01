@@ -9,7 +9,8 @@ readme = "README.md"
 requires-python = ">=3.9"
 dynamic = ["version"]
 authors = [{ name = "haql-qc contributors" }]
-license = { text = "Apache-2.0" }
+# Copyright holder is unresolved. See the NOTICE block at the top of LICENSE.
+license = { file = "LICENSE" }
 keywords = ["oil", "gas", "production", "data-quality", "reservoir", "volve"]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -18,7 +19,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "License :: OSI Approved :: Apache Software License",
+  "License :: Other/Proprietary License",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",

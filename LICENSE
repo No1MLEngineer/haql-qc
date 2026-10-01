@@ -1,0 +1,75 @@
+haql-qc — Proprietary License
+Copyright (c) 2026 [COPYRIGHT HOLDER TO BE FILLED IN]
+
+All rights reserved.
+
+NOTICE: The copyright holder line above is a placeholder and has not been
+set. Do not distribute this software, publish it, or grant any rights under
+it until that line names a real legal entity or person.
+
+------------------------------------------------------------------------------
+
+1. GRANT OF RIGHTS
+
+Subject to the terms below, the Licensor grants you a limited,
+non-exclusive, non-transferable, revocable right to use haql-qc (the
+"Software") solely for your own internal business operations. No other
+rights are granted.
+
+2. RESTRICTIONS
+
+You may not, without a separate written agreement with the Licensor:
+
+  a. copy, redistribute, sublicense, or make the Software available to any
+     third party, including hosting it on a public repository or package
+     index;
+  b. modify, adapt, translate, or create derivative works of the Software;
+  c. reverse engineer, decompile, disassemble, or attempt to derive the
+     source code of the Software, except to the extent such restriction is
+     prohibited by applicable law;
+  d. remove, alter, or obscure any copyright, trademark, or licensing
+     notice in the Software;
+  e. use the Software to provide a competing product or service to any third
+     party.
+
+3. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. THE ENTIRE RISK AS TO
+THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU.
+
+4. LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+5. DATA AND CONFIDENTIALITY
+
+The Software performs no network transmission and collects no telemetry.
+You remain responsible for the confidentiality, residency, and regulatory
+compliance of the data you process with it.
+
+6. TERMINATION
+
+Any right granted under Section 1 terminates automatically if you breach this
+License. On termination you must cease all use of the Software.
+
+7. DISCLAIMER OF ADVICE
+
+The Software performs automated data quality checks. It is not a substitute
+for professional engineering judgment, and its output is not a reserves
+estimate, an audit opinion, or technical advice. Findings require review by
+a qualified professional.
+
+8. GOVERNING LAW
+
+This License is governed by the laws of the jurisdiction in which the
+Licensor is established, excluding its conflict-of-law provisions.
+
+9. NO OPEN-SOURCE GRANT
+
+This Software is not licensed under any open-source or free-software license,
+including the Apache License 2.0. Any earlier statement to that effect in
+project metadata was erroneous and is superseded by this License.
