@@ -1,5 +1,5 @@
 haql-qc — Proprietary License
-Copyright (c) 2026 haql
+Copyright (c) 2026 haql (https://github.com/No1MLEngineer/haql-qc)
 
 All rights reserved.
 
@@ -24,8 +24,8 @@ You may not, without a separate written agreement with the Licensor:
 
   a. copy, redistribute, sublicense, or make the Software available to any
      third party. The Licensor publishes the source itself at
-     https://github.com/haql/haql-qc and on the Python Package Index under
-     the name "haql-qc"; that publication is authorised, and this clause
+     https://github.com/No1MLEngineer/haql-qc and on the Python Package Index
+     under the name "haql-qc"; that publication is authorised, and this clause
      governs redistribution by anyone else;
   b. modify, adapt, translate, or create derivative works of the Software;
   c. reverse engineer, decompile, disassemble, or attempt to derive the

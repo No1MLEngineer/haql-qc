@@ -28,9 +28,9 @@ classifiers = [
 haql-qc = "haql_qc.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/haql/haql-qc"
-Repository = "https://github.com/haql/haql-qc"
-Issues = "https://github.com/haql/haql-qc/issues"
+Homepage = "https://github.com/No1MLEngineer/haql-qc"
+Repository = "https://github.com/No1MLEngineer/haql-qc"
+Issues = "https://github.com/No1MLEngineer/haql-qc/issues"
 
 [tool.hatch.version]
 path = "haql_qc/_version.py"
