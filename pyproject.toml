@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "volve-qc"
+description = "Local-first production data QC for reservoir engineering. Deterministic rules, raw-preserving audit trails, and safe opt-in corrections."
+readme = "README.md"
+requires-python = ">=3.9"
+dynamic = ["version"]
+authors = [{ name = "volve-qc contributors" }]
+license = { text = "Apache-2.0" }
+keywords = ["oil", "gas", "production", "data-quality", "reservoir", "volve"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: Apache Software License",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+]
+
+[project.scripts]
+volve-qc = "volve_qc.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/volve-qc/volve-qc"
+Repository = "https://github.com/volve-qc/volve-qc"
+Issues = "https://github.com/volve-qc/volve-qc/issues"
+
+[tool.hatch.version]
+path = "volve_qc/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["volve_qc"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2.0", "ruff>=0.6.0", "mypy>=1.10.0"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict = false
