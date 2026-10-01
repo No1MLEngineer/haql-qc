@@ -36,9 +36,14 @@ The two numbers are deliberately different things:
     The license verifier's embedded ed25519 public key was replaced with a
     freshly generated issuer keypair held outside the repository. Tokens issued
     under the previous key will not verify against 0.4.0.
+
+    0.4.1 -- metadata only. 0.4.0 shipped with project URLs pointing at
+    github.com/haql, an account that does not belong to us, so the links on
+    PyPI were dead on arrival. Corrected to No1MLEngineer/haql-qc. No code
+    changed, so the ruleset stays put and a 0.4.0 report still reads the same.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 RULESET_VERSION = "1.2.0"
 
